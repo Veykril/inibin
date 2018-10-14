@@ -51,14 +51,8 @@ macro_rules! impl_from_ty {
     }
 }
 
-impl_from_ty!(primitives I8 = i8, I16 = i16, I32 = i32, F32 = f32, Bool = bool);
+impl_from_ty!(primitives I8 = i8, I16 = i16, I32 = i32, F32 = f32, Bool = bool, String = String);
 impl_from_ty!(arrays [f32; 2], [f32; 3], [f32; 4]);
-
-impl From<String> for Value {
-    fn from(string: String) -> Self {
-        Value::String(string)
-    }
-}
 
 #[derive(Debug)]
 pub struct IniBin {
@@ -101,7 +95,7 @@ impl IniBin {
             map: IndexMap::with_capacity(entry_count),
         };
         for (key, offset) in pairs {
-            inibin.read_string(key, &buffer[offset as usize..]);
+            inibin.read_string(key, &buffer[offset as usize..])?;
         }
         Ok(inibin)
     }
@@ -123,7 +117,7 @@ impl IniBin {
             inibin.read_section_numbers(&mut r, |r| r.read_f32::<LE>())?;
         }
         if is_bit_set(flags, BIT_F32_DIV_10) {
-            inibin.read_section_numbers(&mut r, |r| r.read_f32::<LE>().map(|f| f / 10.0))?;
+            inibin.read_section_numbers(&mut r, |r| r.read_u8().map(|b| f32::from(b) / 0.1))?;
         }
         if is_bit_set(flags, BIT_I16) {
             inibin.read_section_numbers(&mut r, |r| r.read_i16::<LE>())?;
@@ -234,20 +228,24 @@ impl IniBin {
         buffer.resize(str_len, 0);
         r.read_exact(&mut buffer)?;
         for (key, offset) in keys.into_iter().zip(offsets) {
-            self.read_string(key, &buffer[offset as usize..]);
+            self.read_string(key, &buffer[offset as usize..])?;
         }
         Ok(())
     }
 
-    fn read_string(&mut self, key: u32, buf: &[u8]) {
+    fn read_string(&mut self, key: u32, buf: &[u8]) -> io::Result<()> {
         let end = buf
             .iter()
             .position(|b| *b == 0)
             .unwrap_or_else(|| buf.len());
         self.map.insert(
             key,
-            Value::String(String::from_utf8(buf[..end].to_owned()).unwrap()),
-        ); //todo remove unwrap
+            Value::String(
+                String::from_utf8(buf[..end].to_owned())
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+            ),
+        );
+        Ok(())
     }
 }
 
