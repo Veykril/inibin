@@ -18,6 +18,28 @@ const BIT_F32_4_DIV_10: u8 = 10;
 const BIT_F32_4: u8 = 11;
 const BIT_STRING: u8 = 12;
 
+use std::iter::once;
+
+pub fn inibin_hash(section: &str, ident: &str) -> u32 {
+    section
+        .bytes()
+        .chain(once(b'*'))
+        .chain(ident.bytes())
+        .fold(0u32, |hash, b| {
+            hash.wrapping_mul(65599)
+                .wrapping_add(u32::from(to_lower(b)))
+        })
+}
+
+#[inline]
+fn to_lower(b: u8) -> u8 {
+    if b >= b'A' && b <= b'Z' {
+        b - b'A' + b'a'
+    } else {
+        b
+    }
+}
+
 #[derive(Clone, PartialOrd, PartialEq, Debug)]
 pub enum Value {
     I8(i8),
@@ -59,6 +81,17 @@ pub struct IniBin {
     map: IndexMap<u32, Value>,
 }
 
+impl IniBin {
+    pub fn map(&self) -> &IndexMap<u32, Value> {
+        &self.map
+    }
+
+    pub fn get(&self, section: &str, ident: &str) -> Option<&Value> {
+        self.map.get(&inibin_hash(section, ident))
+    }
+}
+
+// parsing
 impl IniBin {
     pub fn from_bytes(b: &[u8]) -> io::Result<Self> {
         Self::from_reader(io::Cursor::new(b))
@@ -248,6 +281,9 @@ impl IniBin {
         Ok(())
     }
 }
+
+// todo writing
+impl IniBin {}
 
 #[inline(always)]
 fn is_bit_set(flags: u16, bit: u8) -> bool {
