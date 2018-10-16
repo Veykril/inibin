@@ -2,7 +2,6 @@ use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, SeqAccess, Visito
 
 use smallvec::SmallVec;
 use std::io;
-use std::marker::PhantomData;
 
 use crate::IniBin;
 use crate::{error::Error, error::Result};
@@ -13,23 +12,21 @@ struct State {
     pub current_field_hash: u32,
 }
 
-pub struct Deserializer<'de> {
+pub struct Deserializer {
     inibin: IniBin,
     stack: Vec<State>,
-    _pd: PhantomData<&'de ()>,
 }
 
-impl<'de> Deserializer<'de> {
-    pub fn from_bytes(input: &'de [u8]) -> io::Result<Self> {
+impl Deserializer {
+    pub fn from_bytes(input: &[u8]) -> io::Result<Self> {
         Ok(Deserializer {
             inibin: IniBin::from_bytes(input)?,
             stack: Vec::new(),
-            _pd: PhantomData,
         })
     }
 }
 
-impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
+impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
@@ -87,11 +84,15 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         Err(Error::TypeUnsupported)
     }
 
-    fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::TypeUnsupported)
+        let current_frame = self.stack.last_mut().unwrap();
+        match self.inibin.map().get(&current_frame.current_field_hash) {
+            Some(_) => self.deserialize_any(visitor),
+            None => visitor.visit_none(),
+        }
     }
 
     fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value>
@@ -158,7 +159,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         self.stack.push(State {
-            fields: fields,
+            fields,
             current_field_hash: 0,
             struct_name_hash: crate::inibin_hash(name, ""),
         });
@@ -218,12 +219,12 @@ where
 }
 
 /// What the hell do I name this
-struct MapThing<'a, 'de: 'a> {
-    de: &'a mut Deserializer<'de>,
+struct MapThing<'a> {
+    de: &'a mut Deserializer,
     len: usize,
 }
 
-impl<'a, 'de: 'a> MapAccess<'de> for MapThing<'a, 'de> {
+impl<'a, 'de> MapAccess<'de> for MapThing<'a> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
@@ -258,7 +259,7 @@ struct SmallVecSeq {
 
 impl<'de> de::Deserializer<'de> for &mut SmallVecSeq {
     type Error = Error;
-    fn deserialize_any<V>(mut self, visitor: V) -> Result<V::Value>
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
         where
             V: Visitor<'de>,
     {
