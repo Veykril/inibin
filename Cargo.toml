@@ -4,7 +4,11 @@ version = "0.1.0"
 authors = ["Lukas Wirth <lukastw97@gmail.com>"]
 edition = "2018"
 
+[features]
+default = ["serde"]
+
 [dependencies]
 indexmap = "1.0.1"
 smallvec = "0.6.5"
 byteorder = "1.2.6"
+serde = { version = "1.0.80", optional = true }

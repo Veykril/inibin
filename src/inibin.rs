@@ -20,6 +20,13 @@ const BIT_STRING: u8 = 12;
 
 use std::iter::once;
 
+pub fn inibin_incremental_hash(prev: u32, next: &str) -> u32 {
+    next.bytes().fold(prev, |hash, b| {
+        hash.wrapping_mul(65599)
+            .wrapping_add(u32::from(to_lower(b)))
+    })
+}
+
 pub fn inibin_hash(section: &str, ident: &str) -> u32 {
     section
         .bytes()
@@ -31,6 +38,11 @@ pub fn inibin_hash(section: &str, ident: &str) -> u32 {
         })
 }
 
+#[test]
+fn test() {
+    assert_eq!(inibin_hash("DeathTimeScaling", "StartTime"), inibin_incremental_hash(inibin_hash("DeathTimeScaling", ""), "StartTime"));
+}
+
 #[inline]
 fn to_lower(b: u8) -> u8 {
     if b >= b'A' && b <= b'Z' {
@@ -40,9 +52,19 @@ fn to_lower(b: u8) -> u8 {
     }
 }
 
+#[cfg(not(feature = "serde"))]
 #[derive(Clone, PartialOrd, PartialEq, Debug)]
 pub enum Value {
-    I8(i8),
+    Integer(i64),
+    Float(f32),
+    Vec(SmallVec<[f32; 4]>),
+    String(String),
+}
+
+#[cfg(feature = "serde")]
+#[derive(Clone, PartialOrd, PartialEq, Debug)]
+pub enum Value {
+    U8(u8),
     I16(i16),
     I32(i32),
     I64(i64),
@@ -52,17 +74,14 @@ pub enum Value {
     String(String),
 }
 
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::String(s)
+    }
+}
+
 macro_rules! impl_from_ty {
-    (primitives $( $variant:ident = $from_ty:ty ),*) => {
-        $(
-            impl From<$from_ty> for Value {
-                fn from(val: $from_ty) -> Self {
-                    Value::$variant(val)
-                }
-            }
-        )*
-    };
-    (arrays $( $from_ty:ty ),*) => {
+    (Vec = $( $from_ty:ty ),*) => {
         $(
             impl From<$from_ty> for Value {
                 fn from(val: $from_ty) -> Self {
@@ -70,11 +89,35 @@ macro_rules! impl_from_ty {
                 }
             }
         )*
-    }
+    };
+    ($( $variant:ident = $( $from_ty:ty ),*);*;) => {
+        $(
+            $(
+                impl From<$from_ty> for Value {
+                    fn from(val: $from_ty) -> Self {
+                        Value::$variant(val as _)
+                    }
+                }
+            )*
+        )*
+    };
 }
 
-impl_from_ty!(primitives I8 = i8, I16 = i16, I32 = i32, F32 = f32, Bool = bool, String = String);
-impl_from_ty!(arrays [f32; 2], [f32; 3], [f32; 4]);
+#[cfg(not(feature = "serde"))]
+impl_from_ty! {
+    Integer = i8, u8, i16, u16, i32, u32, i64, u64, bool;
+    Float = f32;
+}
+#[cfg(feature = "serde")]
+impl_from_ty! {
+    U8 = i8, u8;
+    I16 = i16, u16;
+    I32 = i32, u32;
+    I64 = i64, u64;
+    Bool = bool;
+    F32 = f32;
+}
+impl_from_ty!(Vec = [f32; 2], [f32; 3], [f32; 4]);
 
 #[derive(Debug)]
 pub struct IniBin {
@@ -84,6 +127,10 @@ pub struct IniBin {
 impl IniBin {
     pub fn map(&self) -> &IndexMap<u32, Value> {
         &self.map
+    }
+
+    pub fn into_map(self) -> IndexMap<u32, Value> {
+        self.map
     }
 
     pub fn get(&self, section: &str, ident: &str) -> Option<&Value> {
