@@ -40,7 +40,10 @@ pub fn inibin_hash(section: &str, ident: &str) -> u32 {
 
 #[test]
 fn test() {
-    assert_eq!(inibin_hash("DeathTimeScaling", "StartTime"), inibin_incremental_hash(inibin_hash("DeathTimeScaling", ""), "StartTime"));
+    assert_eq!(
+        inibin_hash("DeathTimeScaling", "StartTime"),
+        inibin_incremental_hash(inibin_hash("DeathTimeScaling", ""), "StartTime")
+    );
 }
 
 #[inline]

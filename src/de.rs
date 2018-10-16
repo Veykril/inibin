@@ -1,6 +1,4 @@
-use serde::de::{
-    self, Deserialize, DeserializeSeed, MapAccess, Visitor,
-};
+use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, Visitor};
 
 use std::io;
 use std::marker::PhantomData;
@@ -8,11 +6,15 @@ use std::marker::PhantomData;
 use crate::IniBin;
 use crate::{error::Error, error::Result};
 
+struct State {
+    pub struct_name_hash: u32,
+    pub fields: &'static [&'static str],
+    pub current_field_hash: u32,
+}
+
 pub struct Deserializer<'de> {
     inibin: IniBin,
-    struct_name_hash: u32,
-    fields: &'static [&'static str],
-    current_field_hash: u32,
+    stack: Vec<State>,
     _pd: PhantomData<&'de ()>,
 }
 
@@ -20,9 +22,7 @@ impl<'de> Deserializer<'de> {
     pub fn from_bytes(input: &'de [u8]) -> io::Result<Self> {
         Ok(Deserializer {
             inibin: IniBin::from_bytes(input)?,
-            struct_name_hash: 0,
-            fields: &[],
-            current_field_hash: 0,
+            stack: Vec::new(),
             _pd: PhantomData,
         })
     }
@@ -35,7 +35,8 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        match self.inibin.map().get(&self.current_field_hash) {
+        let current_frame = self.stack.last_mut().unwrap();
+        match self.inibin.map().get(&current_frame.current_field_hash) {
             Some(val) => match val.clone() {
                 crate::Value::U8(val) => visitor.visit_u8(val),
                 crate::Value::I16(val) => visitor.visit_i16(val),
@@ -46,86 +47,85 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 crate::Value::Vec(val) => unimplemented!(),
                 crate::Value::String(val) => visitor.visit_string(val),
             },
-            None => Err(Error::FieldNotFound(self.current_field_hash))
+            None => Err(Error::FieldNotFound(current_frame.current_field_hash)),
         }
     }
 
     fn deserialize_f64<V>(self, _visitor: V) -> Result<V::Value>
-        where
-            V: Visitor<'de>,
+    where
+        V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_str<V>(self, _visitor: V) -> Result<V::Value>
-        where
-            V: Visitor<'de>,
+    where
+        V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_bytes<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_byte_buf<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
-    /// Hint that the `Deserialize` type is expecting a unit value.
     fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_unit_struct<V>(self, _name: &'static str, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_newtype_struct<V>(self, _name: &'static str, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_seq<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_tuple_struct<V>(
@@ -137,14 +137,14 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_struct<V>(
@@ -156,9 +156,15 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        self.struct_name_hash = crate::inibin_hash(name, "");
-        self.fields = fields;
-        visitor.visit_map(MapThing { de: self, len: fields.len() })
+        self.stack.push(State {
+            fields: fields,
+            current_field_hash: 0,
+            struct_name_hash: crate::inibin_hash(name, ""),
+        });
+        visitor.visit_map(MapThing {
+            de: self,
+            len: fields.len(),
+        })
     }
 
     fn deserialize_enum<V>(
@@ -170,20 +176,23 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        if self.fields.len() > 0 {//not needed i think due to map_access?
-            let field = self.fields[0];
-            self.current_field_hash = crate::inibin_incremental_hash(self.struct_name_hash, field);
-            self.fields = &self.fields[1..];
+        let current_frame = self.stack.last_mut().unwrap();
+        if !current_frame.fields.is_empty() {
+            //My MapAccess should prevent this if i am not mistaken
+            let field = current_frame.fields[0];
+            current_frame.current_field_hash =
+                crate::inibin_incremental_hash(current_frame.struct_name_hash, field);
+            current_frame.fields = &current_frame.fields[1..];
             visitor.visit_str(field)
         } else {
-            Err(Error::Message("Inibin has no more fields".into()))
+            unreachable!()
         }
     }
 
@@ -191,7 +200,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        Err(Error::Unsupported)
+        Err(Error::TypeUnsupported)
     }
 
     forward_to_deserialize_any! {
@@ -224,6 +233,7 @@ impl<'a, 'de: 'a> MapAccess<'de> for MapThing<'a, 'de> {
             self.len -= 1;
             seed.deserialize(&mut *self.de).map(Some)
         } else {
+            self.de.stack.pop();
             Ok(None)
         }
     }

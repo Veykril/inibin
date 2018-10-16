@@ -11,7 +11,7 @@ pub type Result<T> = result::Result<T, Error>;
 pub enum Error {
     Message(String),
     Io(io::Error),
-    Unsupported,
+    TypeUnsupported,
     FieldNotFound(u32),
 }
 
@@ -31,7 +31,7 @@ impl error::Error for Error {
     fn description(&self) -> &str {
         match *self {
             Error::Message(ref msg) => msg,
-            Error::Unsupported => "Unsupported",
+            Error::TypeUnsupported => "Unsupported",
             Error::FieldNotFound(_) => "FieldNotFound",
             Error::Io(ref e) => e.description(),
         }
