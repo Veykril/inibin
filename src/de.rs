@@ -1,5 +1,6 @@
-use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, Visitor};
+use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 
+use smallvec::SmallVec;
 use std::io;
 use std::marker::PhantomData;
 
@@ -44,7 +45,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 crate::Value::I64(val) => visitor.visit_i64(val),
                 crate::Value::F32(val) => visitor.visit_f32(val),
                 crate::Value::Bool(val) => visitor.visit_bool(val),
-                crate::Value::Vec(val) => unimplemented!(),
+                crate::Value::Vec(vec) => visitor.visit_seq(SmallVecSeq { vec, idx: 0 }),
                 crate::Value::String(val) => visitor.visit_string(val),
             },
             None => Err(Error::FieldNotFound(current_frame.current_field_hash)),
@@ -247,5 +248,43 @@ impl<'a, 'de: 'a> MapAccess<'de> for MapThing<'a, 'de> {
 
     fn size_hint(&self) -> Option<usize> {
         Some(self.len)
+    }
+}
+
+struct SmallVecSeq {
+    vec: SmallVec<[f32; 4]>,
+    idx: usize,
+}
+
+impl<'de> de::Deserializer<'de> for &mut SmallVecSeq {
+    type Error = Error;
+    fn deserialize_any<V>(mut self, visitor: V) -> Result<V::Value>
+        where
+            V: Visitor<'de>,
+    {
+        let r = visitor.visit_f32(self.vec[self.idx]);
+        self.idx += 1;
+        r
+    }
+
+    forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf option unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum identifier ignored_any
+    }
+}
+
+impl<'de> SeqAccess<'de> for SmallVecSeq {
+    type Error = Error;
+    fn next_element_seed<T>(
+        &mut self,
+        seed: T
+    ) -> Result<Option<T::Value>> where
+        T: DeserializeSeed<'de> {
+        if self.idx < self.vec.len() {
+            seed.deserialize(self).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 }
